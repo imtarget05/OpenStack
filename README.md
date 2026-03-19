@@ -1,4 +1,4 @@
-# OpenStack Resource Manager - NT533 Lab 1
+# OpenStack Resource Manager - NT533 Lab 2
 
 Ứng dụng Python quản lý tài nguyên OpenStack qua REST API cho môn **NT533 - Hệ tính toán phân bố**.
 
