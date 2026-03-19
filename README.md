@@ -1,4 +1,4 @@
-# OpenStack Resource Manager - NT533 Lab 1
+# OpenStack Resource Manager - NT533 Lab 2
 
 Ứng dụng Python quản lý tài nguyên OpenStack qua REST API cho môn **NT533 - Hệ tính toán phân bố**.
 
@@ -52,6 +52,7 @@ python app.py
 | 12-14 | Quản lý VM | Liệt kê, tạo (+ user data), xóa máy ảo |
 | 15 | Security Groups | Liệt kê Security Groups |
 | 16 | Floating IPs | Liệt kê Floating IPs |
+| 17 | Gán Floating IP | Gán Floating IP cho máy ảo đã có sẵn |
 | **20** | **Auto Setup** | **Tự động tạo Network + Subnet + Router + SG + VM + Floating IP** |
 | 30-32 | Load Balancer | Thiết lập, liệt kê, xóa Load Balancer (Octavia) |
 | **40** | **Scale Up/Down** | **Tăng/giảm VM tự động thêm/xóa khỏi LB pool** |

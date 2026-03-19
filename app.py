@@ -53,6 +53,40 @@ def choose_from_list(items, name_key="name", id_key="id", label=""):
         print("  Lựa chọn không hợp lệ!")
 
 
+def list_bootable_networks(networks=None, subnets=None):
+    """Trả về network nội bộ có ít nhất 1 subnet để có thể boot VM."""
+    if networks is None:
+        networks = client.list_networks()
+    if subnets is None:
+        subnets = client.list_subnets()
+
+    subnet_count_by_net = {}
+    for s in subnets:
+        net_id = s.get("network_id")
+        if not net_id:
+            continue
+        subnet_count_by_net[net_id] = subnet_count_by_net.get(net_id, 0) + 1
+
+    project_id = client.project_id
+    bootable = []
+    non_bootable = []
+    for n in networks:
+        if n.get("router:external"):
+            continue
+
+        net_owner = n.get("project_id") or n.get("tenant_id")
+        if project_id and net_owner and net_owner != project_id:
+            continue
+
+        subnet_count = subnet_count_by_net.get(n.get("id"), 0)
+        if subnet_count > 0:
+            bootable.append((n, subnet_count))
+        else:
+            non_bootable.append(n)
+
+    return bootable, non_bootable
+
+
 def get_router_using_subnet(subnet_id):
     """Trả về router đang gắn interface với subnet, nếu có."""
     ports = client.list_ports()
@@ -538,11 +572,40 @@ def menu_create_server():
 
     flavor = pick_compatible_flavor(image)
 
-    # Chọn network
+    # Chọn network có subnet
     print("\n-- Chọn Network --")
     nets = client.list_networks()
-    user_nets = [n for n in nets if not n.get("router:external")]
-    net = choose_from_list(user_nets, label="network")
+    subnets = client.list_subnets()
+    bootable_nets, non_bootable_nets = list_bootable_networks(nets, subnets)
+
+    if not bootable_nets:
+        raise ValueError(
+            "Không có network nội bộ nào có subnet để boot VM. "
+            "Hãy tạo subnet hoặc chọn network khác."
+        )
+
+    for i, (n, subnet_count) in enumerate(bootable_nets):
+        print(f"  {i+1}. {n.get('name', 'N/A')} ({n.get('id', '')}) - Subnets: {subnet_count}")
+
+    if non_bootable_nets:
+        print("\n  Network không có subnet (không thể boot VM) đã ẩn:")
+        for n in non_bootable_nets:
+            print(f"  - {n.get('name', 'N/A')} ({n.get('id', '')})")
+
+    while True:
+        choice = input(f"Chọn network (1-{len(bootable_nets)}): ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(bootable_nets):
+            net = bootable_nets[int(choice) - 1][0]
+            break
+        print("  Lựa chọn không hợp lệ!")
+
+    # Chặn sớm nếu subnet vừa bị xóa giữa lúc chọn và lúc tạo.
+    if not net.get("subnets") and not any(s.get("network_id") == net.get("id") for s in subnets):
+        raise ValueError(
+            f"Network '{net.get('name')}' hiện không có subnet. "
+            "Vui lòng tạo subnet trước khi tạo máy ảo."
+        )
+
     if not net:
         return
 
@@ -586,15 +649,12 @@ def _assign_floating_ip(server_id):
         if fixed.get("subnet_id")
     }
 
-    # Chỉ chọn external network thật sự reachable từ subnet của VM qua router.
+    # Tìm router đang nối tới subnet của VM.
     reachable_ext_net_id = None
+    reachable_router = None
+    candidate_routers = []
     routers = client.list_routers()
     for r in routers:
-        gw = r.get("external_gateway_info") or {}
-        ext_id = gw.get("network_id")
-        if not ext_id:
-            continue
-
         r_ports = client.list_ports(device_id=r["id"])
         router_subnet_ids = {
             fixed.get("subnet_id")
@@ -603,9 +663,53 @@ def _assign_floating_ip(server_id):
             for fixed in rp.get("fixed_ips", [])
             if fixed.get("subnet_id")
         }
-        if server_subnet_ids.intersection(router_subnet_ids):
+        if not server_subnet_ids.intersection(router_subnet_ids):
+            continue
+
+        candidate_routers.append(r)
+        gw = r.get("external_gateway_info") or {}
+        ext_id = gw.get("network_id")
+        if ext_id and not reachable_ext_net_id:
             reachable_ext_net_id = ext_id
-            break
+            reachable_router = r
+
+    networks = client.list_networks()
+
+    # Nếu router nối subnet VM chưa có external gateway, hỗ trợ cấu hình tự động.
+    if not reachable_ext_net_id and candidate_routers:
+        router_for_gateway = candidate_routers[0]
+        if len(candidate_routers) > 1:
+            print("\nCó nhiều router đang nối tới subnet của VM. Chọn router để cấu hình external gateway:")
+            picked = choose_from_list(candidate_routers, label="router")
+            if not picked:
+                return
+            router_for_gateway = picked
+
+        ext_net = client.find_external_network()
+        if not ext_net:
+            raise ValueError(
+                "Router nội bộ của VM chưa có external gateway và không tìm thấy external network mặc định. "
+                "Vui lòng cấu hình external network rồi thử lại."
+            )
+
+        use_auto_fix = ask(
+            f"Router '{router_for_gateway.get('name', router_for_gateway['id'])}' chưa có external gateway. "
+            f"Tự kết nối tới external network '{ext_net.get('name', ext_net['id'])}'? (y/n)",
+            "y",
+        )
+        if use_auto_fix.lower() != "y":
+            raise ValueError(
+                "Chưa thể gán Floating IP vì router nối subnet VM chưa có external gateway. "
+                "Hãy cấu hình router rồi thử lại."
+            )
+
+        client.set_router_gateway(router_for_gateway["id"], ext_net["id"])
+        print(
+            f"  Đã cấu hình external gateway cho router "
+            f"{router_for_gateway.get('name', router_for_gateway['id'])} -> {ext_net.get('name', ext_net['id'])}"
+        )
+        reachable_ext_net_id = ext_net["id"]
+        reachable_router = router_for_gateway
 
     if not reachable_ext_net_id:
         raise ValueError(
@@ -613,7 +717,6 @@ def _assign_floating_ip(server_id):
             "Vui lòng cấu hình router: external gateway + interface vào subnet VM trước khi gán Floating IP."
         )
 
-    networks = client.list_networks()
     ext_net = next((n for n in networks if n.get("id") == reachable_ext_net_id), None)
     ext_net_name = ext_net.get("name") if ext_net else reachable_ext_net_id
 
@@ -632,7 +735,13 @@ def _assign_floating_ip(server_id):
             pass
         raise
 
-    print(f"[OK] Đã gán Floating IP {fip['floating_ip_address']} cho server {server_id}")
+    if reachable_router:
+        print(
+            f"[OK] Đã gán Floating IP {fip['floating_ip_address']} cho server {server_id} "
+            f"qua router {reachable_router.get('name', reachable_router.get('id'))}"
+        )
+    else:
+        print(f"[OK] Đã gán Floating IP {fip['floating_ip_address']} cho server {server_id}")
     return fip
 
 
@@ -1110,6 +1219,21 @@ def menu_list_floating_ips():
     print(f"\nTổng: {len(fips)} floating IP(s)")
 
 
+def menu_assign_floating_ip_existing_server():
+    """Gán Floating IP cho máy ảo đã có sẵn."""
+    print("\n=== GÁN FLOATING IP CHO MÁY ẢO ===")
+    servers = client.list_servers()
+    if not servers:
+        print("Không có máy ảo nào.")
+        return
+
+    srv = choose_from_list(servers, label="máy ảo")
+    if not srv:
+        return
+
+    _assign_floating_ip(srv["id"])
+
+
 # ============================================================
 #  MAIN MENU
 # ============================================================
@@ -1139,6 +1263,7 @@ def main_menu():
   ===== SECURITY & NETWORKING =====
   15.  Liệt kê Security Groups
   16.  Liệt kê Floating IPs
+  17.  Gán Floating IP cho máy ảo
 
   ===== THIẾT LẬP HOÀN CHỈNH =====
   20.  [AUTO] Thiết lập mạng + Tạo VM
@@ -1192,6 +1317,8 @@ def main_menu():
                 menu_list_security_groups()
             elif choice == "16":
                 menu_list_floating_ips()
+            elif choice == "17":
+                menu_assign_floating_ip_existing_server()
             elif choice == "20":
                 menu_full_setup()
             elif choice == "30":

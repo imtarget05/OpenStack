@@ -266,6 +266,17 @@ class OpenStackClient:
         data = self.put("network", f"/v2.0/routers/{router_id}", body)
         return data.get("router", data)
 
+    def set_router_gateway(self, router_id, external_network_id):
+        body = {
+            "router": {
+                "external_gateway_info": {
+                    "network_id": external_network_id,
+                }
+            }
+        }
+        data = self.put("network", f"/v2.0/routers/{router_id}", body)
+        return data.get("router", data)
+
     def add_router_interface(self, router_id, subnet_id):
         body = {"subnet_id": subnet_id}
         return self.put("network", f"/v2.0/routers/{router_id}/add_router_interface", body)
