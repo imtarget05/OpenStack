@@ -20,12 +20,12 @@ VOLUME_URL = "https://cloud-volume.uitiot.vn/v3"
 AUTH_METHOD = "password"
 
 # Phương thức 1: Username/Password
-AUTH_USERNAME = "23521401"       # VD: "student01"
-AUTH_PASSWORD = "tBXuQwtPKX6Z20PJUUQF"       # VD: "mypassword"
-AUTH_PROJECT_NAME = "NT533.Q21.G6"   # VD: "nhom01"
-AUTH_PROJECT_ID = "4d98fda864794317a0caeee274ea76d2"           # Có thể để trống. Nếu có, sẽ ưu tiên hơn AUTH_PROJECT_NAME
-AUTH_USER_DOMAIN_NAME = "Default"
-AUTH_PROJECT_DOMAIN_NAME = "Default"
+# AUTH_USERNAME = ""       # VD: "student01"
+# AUTH_PASSWORD = ""       # VD: "mypassword"
+# AUTH_PROJECT_NAME = ""   # VD: "nhom01"
+# AUTH_PROJECT_ID = ""           # Có thể để trống. Nếu có, sẽ ưu tiên hơn AUTH_PROJECT_NAME
+# AUTH_USER_DOMAIN_NAME = "Default"
+# AUTH_PROJECT_DOMAIN_NAME = "Default"
 
 # Phương thức 2: Application Credential
 # Lấy tại Horizon > Identity > Application Credentials
